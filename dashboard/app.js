@@ -1,4 +1,4 @@
-// Token Radar, radar-2 dashboard. It reads window.RADAR (written beside
+// Token Radar, radar-3 dashboard. It reads window.RADAR (written beside
 // dashboard/ by main.ts) and renders the ranked board, a filterable table, a
 // per-protocol detail drawer with the model's own inputs and the protocol's
 // farm plan, and a separate live-token view. No network: every byte it shows
@@ -28,7 +28,7 @@
     if (days >= 365) return (days / 365).toFixed(1) + 'y';
     return Math.max(0, Math.round(days)) + 'd';
   }
-  // The radar-2 model in one function: the page recomputes a row from the
+  // The radar-3 model in one function: the page recomputes a row from the
   // snapshot figures and checks the number board.json carries, so the page's
   // code and the board's data are visibly the same arithmetic.
   function impliedOf(row, model) {
@@ -115,7 +115,7 @@
     var capital = capitalFor(p);
     var hold = holdDaysFor(p.age_days);
     return [
-      { text: 'Open a fresh wallet that holds only the funds you plan to farm, and write its seed phrase on paper and store it offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
+      { text: 'Open a fresh wallet on ' + chain + ' that holds only the funds you plan to farm, and write its seed phrase on paper and store it offline.', cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
       { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and about $' + (capital >= 150 ? 8 : 4) + ' of gas', time: '15 minutes to set up' },
       { text: 'Once a week, ' + weeklyFor(p) + ', so the wallet shows repeated use instead of one deposit.', cost: 'about $2 of gas a week', time: '10 minutes a week' },
       { text: 'Hold the position for at least ' + hold + ' days so the activity spans more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
@@ -223,17 +223,27 @@
     return el('div', { class: 'mix' }, bar, legend);
   }
 
+  // Top movers by dollars gained, not by percentage: a +4448% week on a
+  // $47M protocol is a data spike, while +5% on a $1.5B protocol is $84M of
+  // real money in. Gained dollars = tvl * change / (100 + change), from the
+  // snapshot's own figures alone.
   function movers() {
     var top = DATA.rows.filter(function (r) { return r.change_7d !== null; })
-      .sort(function (a, b) { return b.change_7d - a.change_7d; }).slice(0, 5);
-    return el('div', { class: 'movers' }, top.map(function (r) {
+      .map(function (r) { return { row: r, gained: r.tvl_usd * r.change_7d / (100 + r.change_7d) }; })
+      .sort(function (a, b) { return b.gained - a.gained; }).slice(0, 5);
+    return el('div', { class: 'movers' }, top.map(function (t) {
+      var r = t.row;
       return el('button', { type: 'button', class: 'mover', onclick: function () { openDetail(r.slug); } },
         el('span', { class: 'sub', text: 'Top mover · rank ' + r.rank }),
         el('b', { text: r.name }),
-        el('span', { class: 'pct', text: fmtPct(r.change_7d) + ' in 7d' }),
-        el('span', { class: 'meta', text: fmtUsd(r.tvl_usd) + ' TVL · ' + fmtUsd(r.implied_value_usd) + ' implied' })
+        el('span', { class: 'pct', text: '+' + fmtUsd(t.gained) + ' in 7d' }),
+        el('span', { class: 'meta', text: fmtPct(r.change_7d) + ' · ' + fmtUsd(r.tvl_usd) + ' TVL · ' + fmtUsd(r.implied_value_usd) + ' implied' })
       );
     }));
+  }
+
+  function moversNote() {
+    return el('p', { class: 'sub movers-note', text: 'Movers rank by dollars of TVL gained in seven days, not by percentage: +5.64% on a $1.58B protocol is $84M of real money in, while +4448% on a $47M protocol is a data spike. The percentage is still printed, small, on each card.' });
   }
 
   function spotlight() {
@@ -388,6 +398,19 @@
         'maturity = ' + m.maturity_floor + ' + 0.5 x min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + '   — up to four years with no token\n' +
         'implied = round( base x growth multiplier x maturity )'
       ),
+      el('div', { class: 'why' },
+        el('h3', { text: 'Why the growth term is damped' }),
+        el('p', { text: 'Seven-day change is the noisiest figure in the snapshot: one row reads +4448.47% in a week, three read above +100%, six above +50%.' }),
+        el('p', { text: 'Under the earlier weight of 1.2 and cap of 150, one week could move implied value 2.8x up or 0.4x down — a 7x spread from a single noisy week.' }),
+        el('p', { text: 'Radar-3 uses weight 0.8 and cap 100, so the swing is 1.8x up or 0.6x down. Growth still counts; it just cannot dominate TVL and age.' }),
+        el('p', { text: 'Only the extreme-growth rows move. The top five do not change, and the top ten are identical:' }),
+        el('ul', { class: 'moves' },
+          el('li', { text: 'Monolith Market: rank 106 to 145 (+162.86% on $7.2M TVL)' }),
+          el('li', { text: 'NUVA: rank 63 to 92 (+160.80% on $15.9M TVL)' }),
+          el('li', { text: 'Shift DeFi: rank 33 to 44 (+4448.47% on $47.6M TVL)' }),
+          el('li', { text: 'Anemoy Capital: rank 148 to 117 — a negative week is punished less' })
+        )
+      ),
       el('p', { class: 'sub', text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Growth weighs ' + m.growth_weight + ' here, against 0.5 in the starter model, and the TVL term is sub-linear. The early radar is every rankable pre-token protocol below the watchlist floor, and the live-token protocols are set aside with their market caps shown.' })
     );
   }
@@ -401,6 +424,15 @@
       el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(2, Math.min(100, Math.round(widthPct))) + '%' })),
       el('b', { text: value })
     );
+  }
+
+  function rankReason(row, calc) {
+    var growth = row.change_7d === null ? 0 : row.change_7d;
+    if (calc.growthMult >= 1.15) return 'The week lifts it: ' + fmtPct(growth) + ' in seven days multiplies its base by ' + row.growth_multiplier + '.';
+    if (calc.growthMult <= 0.85) return 'The week holds it back: ' + fmtPct(growth) + ' in seven days cuts its base to ' + row.growth_multiplier + ' of itself.';
+    if (calc.maturity >= 0.9) return 'Its long record lifts it: ' + fmtAge(row.age_days) + ' with no token gives a maturity multiplier of ' + row.maturity_multiplier + '.';
+    var n = row.chains ? row.chains.length : 1;
+    return 'Its TVL does the work: ' + fmtUsd(row.tvl_usd) + ' across ' + n + ' chain' + (n === 1 ? '' : 's') + ', a steady week and a ' + fmtAge(row.age_days) + ' record.';
   }
 
   function openDetail(slug) {
@@ -433,10 +465,11 @@
       ),
       el('div', { class: 'breakdown' },
         breakRow('Base', (row.base_usd / maxBase) * 100, fmtUsd(row.base_usd)),
-        breakRow('Growth mult', (calc.growthMult / 2.8) * 100, String(row.growth_multiplier)),
+        breakRow('Growth mult', (calc.growthMult / 1.8) * 100, String(row.growth_multiplier)),
         breakRow('Maturity mult', calc.maturity * 100, String(row.maturity_multiplier))
       ),
-      el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(calc.implied) + (calc.implied === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price, and no token launch is promised.' })
+      el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(calc.implied) + (calc.implied === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price, and no token launch is promised.' }),
+      el('p', { class: 'sub', text: 'Why rank ' + row.rank + ': ' + rankReason(row, calc) })
     ));
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
@@ -462,6 +495,7 @@
     if (state.tab === 'pre-token') shell.appendChild(spotlight());
     if (state.tab === 'pre-token') shell.appendChild(mix());
     if (state.tab === 'pre-token') shell.appendChild(movers());
+    if (state.tab === 'pre-token') shell.appendChild(moversNote());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());

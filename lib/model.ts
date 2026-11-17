@@ -1,4 +1,4 @@
-// Token Radar, model radar-2: one sealed snapshot in, one ranked board out.
+// Token Radar, model radar-3: one sealed snapshot in, one ranked board out.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a
 // ceiling) and every other rankable pre-token protocol below it: a protocol is
@@ -15,8 +15,14 @@
 //
 //   base        = round(tvl_usd ^ 0.85 x 0.9)          sub-linear: TVL alone
 //                                                    must not decide the rank
-//   growth      = clamp(change_7d, -50, 150) per cent
-//   growthMult  = 1 + (growth / 100) x 1.2            growth weighs 1.2, not 0.5
+//   growth      = clamp(change_7d, -50, 100) per cent
+//   growthMult  = 1 + (growth / 100) x 0.8            one week is the
+//                                                    noisiest figure in the
+//                                                    snapshot, so it may move
+//                                                    value 1.8x at most, not
+//                                                    2.8x: a +4448% week on a
+//                                                    $47M protocol is a data
+//                                                    spike, not a launch
 //   maturity    = 0.5 + 0.5 x min(age_days, 1460) / 1460
 //                                                    a protocol that has run
 //                                                    up to four years with no
@@ -66,16 +72,16 @@ export interface ModelConstants {
 export const MODEL: ModelConstants = {
   base_exponent: 0.85,
   base_scale: 0.9,
-  growth_weight: 1.2,
+  growth_weight: 0.8,
   growth_floor: -50,
-  growth_cap: 150,
+  growth_cap: 100,
   maturity_floor: 0.5,
   maturity_days: 1460,
   unknown_age_days: 365,
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-2';
+export const MODEL_VERSION = 'radar-3';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -381,7 +387,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const weekly = weeklyFor(p);
   return [
     {
-      text: `Open a fresh wallet that holds only the funds you plan to farm, and write its seed phrase on paper and store it offline.`,
+      text: `Open a fresh wallet on ${chain} that holds only the funds you plan to farm, and write its seed phrase on paper and store it offline.`,
       cost: 'under $3 of gas for the first transaction',
       time: '5 minutes',
     },
