@@ -1,16 +1,17 @@
-// Token Radar, model radar-3: one sealed snapshot in, one ranked board out.
+// Token Radar, model radar-4: one sealed snapshot in, one ranked board out.
 //
-// The board covers every slug in the snapshot's watchlist (the floor, never a
-// ceiling) and every other rankable pre-token protocol below it: a protocol is
-// rankable when its record carries no token at all (no market cap, no
-// CoinGecko id, no symbol) AND it passes the house watchlist rule in full
-// (RULES.txt, "The snapshot"): its category is not a wrapped, staked or
-// bridged product of a token that already trades, its name carries no whole
-// word wrapped, staked or staking, it does not begin with an exchange's name,
-// and it carries no version marker. Live-token protocols are kept apart and
-// shown with the market's own value, never mixed into the ranked board.
+// The board ranks every protocol in the snapshot's watchlist (the floor,
+// never a ceiling) plus every other rankable pre-token protocol below it.
+// A protocol is rankable when its record carries no token at all (no market
+// cap, no CoinGecko id, no symbol) AND it passes the house watchlist rule
+// in full (RULES.txt, "The snapshot"): its category is not a wrapped,
+// staked or bridged product of a token that already trades, its name
+// carries no whole word wrapped, staked or staking, it does not begin with
+// an exchange's name, and it carries no version marker. Live-token
+// protocols are kept apart and shown with the market's own value, never
+// mixed into the ranked board.
 //
-// Implied value follows only from the snapshot's own figures, and it is
+// Implied value follows only from the snapshot's own figures. It is
 // deliberately not the starter's linear TVL model:
 //
 //   base        = round(tvl_usd ^ 0.85 x 0.9)          sub-linear: TVL alone
@@ -30,9 +31,18 @@
 //                                                    a newborn one
 //   implied     = max(1, round(base x growthMult x maturity))
 //
-// Age is the time since the protocol was first listed; an unknown age uses
-// 365 days. No protocol name is ever special-cased: the same function scores
-// every row, and every row carries its own breakdown so a reader can check it.
+// Age is the time since the protocol was first listed. An unknown age uses
+// the board's own median known age, 418 days (radar-4: the old default of
+// 365 was arbitrary; 418 is the median of the 191 known ages among the 198
+// board rows, so an unlisted protocol is scored as a typical one, not as a
+// young one). No protocol name is ever special-cased: the same function
+// scores every row, and every row carries its own breakdown so a reader can
+// check it.
+//
+// Radar-4 also fixes one wording slip from radar-3: the weekly-yield farm
+// step read "the weekly yield" in board.json and "the week's yield" in the
+// page. Both now read "the week's yield", so the board and the page agree
+// word for word.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -77,11 +87,11 @@ export const MODEL: ModelConstants = {
   growth_cap: 100,
   maturity_floor: 0.5,
   maturity_days: 1460,
-  unknown_age_days: 365,
+  unknown_age_days: 418,
 };
 
 /** The model's version label: the dashboard names it. */
-export const MODEL_VERSION = 'radar-3';
+export const MODEL_VERSION = 'radar-4';
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -201,6 +211,24 @@ export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: Mo
   const base = Math.round(Math.pow(protocol.tvl_usd, model.base_exponent) * model.base_scale);
   const implied = Math.max(1, Math.round(base * growthMult * maturityMult));
   return { implied, base, growthPct, growthMult, maturityMult, age };
+}
+
+/**
+ * How the week's move and the protocol's age each push its implied value
+ * away from its TVL base, in percentage points of the base:
+ *
+ *   implied / base - 1 = (growthMult - 1) + growthMult x (maturityMult - 1)
+ *
+ * so the two contributions add up exactly to the gap between base and
+ * implied. The dashboard draws them as one diverging bar per row: the
+ * week's slice and the age slice, green when they lift the value, red when
+ * they hold it back. Both come from the same multipliers above, so the bar
+ * and the board can never disagree.
+ */
+export function drivers(row: { base_usd: number; growth_multiplier: number; maturity_multiplier: number; implied_value_usd: number }): { growthPct: number; maturityPct: number; totalPct: number } {
+  const growthPct = (row.growth_multiplier - 1) * 100;
+  const maturityPct = row.growth_multiplier * (row.maturity_multiplier - 1) * 100;
+  return { growthPct, maturityPct, totalPct: growthPct + maturityPct };
 }
 
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
@@ -369,7 +397,7 @@ function weeklyFor(p: SnapshotProtocol): string {
   if (c.includes('bridge')) return 'bridge a small amount in either direction';
   if (c.includes('perpetual') || c.includes('derivative') || c.includes('basis')) return 'adjust the hedge by a small amount';
   if (c.includes('prediction')) return 'settle or place one small market position';
-  if (c.includes('yield') || c.includes('curator') || c.includes('allocator') || c.includes('vault')) return 'claim and restake the weekly yield';
+  if (c.includes('yield') || c.includes('curator') || c.includes('allocator') || c.includes('vault')) return "claim and restake the week's yield";
   return 'make a deposit, a swap or a vote';
 }
 

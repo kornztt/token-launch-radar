@@ -1,8 +1,9 @@
-// Token Radar, radar-3 dashboard. It reads window.RADAR (written beside
-// dashboard/ by main.ts) and renders the ranked board, a filterable table, a
-// per-protocol detail drawer with the model's own inputs and the protocol's
-// farm plan, and a separate live-token view. No network: every byte it shows
-// is in data.js.
+// Token Radar, radar-4 dashboard. It reads window.RADAR (written beside
+// dashboard/ by main.ts) and renders the ranked board, a filterable table
+// with a per-row drivers column, two charts that make the ranking legible,
+// a per-protocol detail drawer with the model's own inputs and the
+// protocol's farm plan, and a separate live-token view. No network: every
+// byte it shows is in data.js.
 (function () {
   'use strict';
 
@@ -28,7 +29,11 @@
     if (days >= 365) return (days / 365).toFixed(1) + 'y';
     return Math.max(0, Math.round(days)) + 'd';
   }
-  // The radar-3 model in one function: the page recomputes a row from the
+  function fmtSigned(n, digits) {
+    if (n === null || n === undefined || !isFinite(n)) return 'n/a';
+    return (n > 0 ? '+' : '') + n.toFixed(digits === undefined ? 1 : digits) + '%';
+  }
+  // The radar-4 model in one function: the page recomputes a row from the
   // snapshot figures and checks the number board.json carries, so the page's
   // code and the board's data are visibly the same arithmetic.
   function impliedOf(row, model) {
@@ -38,6 +43,18 @@
     var maturity = model.maturity_floor + (1 - model.maturity_floor) * (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days);
     var base = Math.round(Math.pow(row.tvl_usd, model.base_exponent) * model.base_scale);
     return { implied: Math.max(1, Math.round(base * growthMult * maturity)), base: base, growthMult: growthMult, maturity: maturity };
+  }
+  // The two slices that push a row's implied value away from its TVL base,
+  // in percentage points of the base. They add up exactly to the gap
+  // between base and implied: (g - 1) + g x (m - 1) = implied / base - 1.
+  // The same arithmetic lives in lib/model.ts as drivers(); the bar and the
+  // board can never disagree.
+  function driversOf(row) {
+    var g = row.growth_multiplier;
+    var m = row.maturity_multiplier;
+    var growth = (g - 1) * 100;
+    var maturity = g * (m - 1) * 100;
+    return { growth: growth, maturity: maturity, total: growth + maturity };
   }
 
   function el(tag, attrs) {
@@ -63,7 +80,8 @@
 
   // The farm plan is the same derivation main.ts writes to board.json:
   // category, chains, TVL and age decide the action, the capital, the hold
-  // and every cost and time. No name is special-cased.
+  // and every cost and time. No name is special-cased, and the wording is
+  // the same in both places, word for word.
   function chainOf(p) { return p.chains && p.chains.length > 0 ? p.chains[0] : 'its main chain'; }
   function capitalFor(p) {
     if (p.tvl_usd >= 5e9) return 250;
@@ -258,6 +276,124 @@
     }));
   }
 
+  // One diverging bar for a row's drivers: the week's slice and the age
+  // slice, stacked from the zero line. The scale is fixed at -100% to
+  // +100% of the base, so two rows' bars read on the same scale. Green
+  // lifts the value, red holds it back.
+  function driverBar(d, wide) {
+    var from = 0;
+    var segs = [];
+    [d.growth, d.maturity].forEach(function (v) {
+      var a = 50 + from * 0.5;
+      var b = 50 + (from + v) * 0.5;
+      segs.push(el('i', { style: 'left:' + Math.min(a, b).toFixed(1) + '%;width:' + Math.abs(b - a).toFixed(1) + '%;background:' + (v >= 0 ? '#0f7a4d' : '#b3382e') }));
+      from += v;
+    });
+    var bar = el('div', { class: wide ? 'driver-bar wide' : 'driver-bar' }, segs);
+    bar.appendChild(el('i', { class: 'zero' }));
+    return bar;
+  }
+  function driverCell(row) {
+    var d = driversOf(row);
+    var label = 'G ' + fmtSigned(d.growth) + ' · M ' + fmtSigned(d.maturity);
+    var title = 'Base ' + fmtUsd(row.base_usd) + '; the week adds ' + fmtSigned(d.growth) + ' and age adds ' + fmtSigned(d.maturity) + '; implied ' + fmtUsd(row.implied_value_usd);
+    return el('div', { class: 'driver', title: title }, driverBar(d, false), el('span', { text: label }));
+  }
+
+  // Implied value against TVL, both on log scales: one dot per row,
+  // watchlist rows indigo, early rows amber. The dashed line is the base
+  // from TVL alone (implied = TVL^0.85 x 0.9); a dot above it was lifted by
+  // a good week or a long record, a dot below it held back. The line is
+  // straight because the base is a power law.
+  function scatterChart() {
+    var W = 620, H = 330, L = 58, R = 14, T = 14, B = 38;
+    var pts = DATA.rows.map(function (r) { return { x: Math.log10(r.tvl_usd), y: Math.log10(r.implied_value_usd), wl: r.watchlist }; });
+    var xs = pts.map(function (p) { return p.x; });
+    var ys = pts.map(function (p) { return p.y; });
+    var x0 = Math.floor(Math.min.apply(null, xs) * 2) / 2 - 0.1;
+    var x1 = Math.ceil(Math.max.apply(null, xs) * 2) / 2 + 0.1;
+    var b = Math.log10(DATA.model.base_scale);
+    var lineY0 = DATA.model.base_exponent * x0 + b;
+    var lineY1 = DATA.model.base_exponent * x1 + b;
+    var y0 = Math.floor(Math.min(Math.min.apply(null, ys), lineY0) * 2) / 2 - 0.1;
+    var y1 = Math.ceil(Math.max(Math.max.apply(null, ys), lineY1) * 2) / 2 + 0.1;
+    function X(v) { return L + (v - x0) / (x1 - x0) * (W - L - R); }
+    function Y(v) { return T + (y1 - v) / (y1 - y0) * (H - T - B); }
+    function moneyTick(v) {
+      if (v >= 9) return '$' + Math.round(Math.pow(10, v - 9)) + 'B';
+      if (v >= 6) return '$' + Math.round(Math.pow(10, v - 6)) + 'M';
+      return '$' + Math.round(Math.pow(10, v - 3)) + 'K';
+    }
+    var s = '';
+    s += '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Implied value against TVL, log scales">';
+    for (var tx = Math.ceil(x0); tx <= Math.floor(x1); tx++) {
+      s += '<line x1="' + X(tx).toFixed(1) + '" y1="' + Y(y0).toFixed(1) + '" x2="' + X(tx).toFixed(1) + '" y2="' + Y(y1).toFixed(1) + '" stroke="#e5ddc9" stroke-width="1"/>';
+      s += '<text x="' + X(tx).toFixed(1) + '" y="' + (H - 22).toFixed(1) + '" text-anchor="middle">' + moneyTick(tx) + '</text>';
+    }
+    for (var ty = Math.ceil(y0); ty <= Math.floor(y1); ty++) {
+      s += '<line x1="' + X(x0).toFixed(1) + '" y1="' + Y(ty).toFixed(1) + '" x2="' + X(x1).toFixed(1) + '" y2="' + Y(ty).toFixed(1) + '" stroke="#e5ddc9" stroke-width="1"/>';
+      s += '<text x="' + (L - 8).toFixed(1) + '" y="' + (Y(ty) + 3).toFixed(1) + '" text-anchor="end">' + moneyTick(ty) + '</text>';
+    }
+    s += '<line x1="' + X(x0).toFixed(1) + '" y1="' + Y(lineY0).toFixed(1) + '" x2="' + X(x1).toFixed(1) + '" y2="' + Y(lineY1).toFixed(1) + '" stroke="#c47f17" stroke-width="1.5" stroke-dasharray="6 4"/>';
+    s += '<text x="' + (X(x1) - 4).toFixed(1) + '" y="' + (Y(lineY1) - 8).toFixed(1) + '" text-anchor="end" fill="#c47f17">base from TVL alone</text>';
+    pts.forEach(function (p) {
+      s += '<circle cx="' + X(p.x).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="' + (p.wl ? 3.5 : 3) + '" fill="' + (p.wl ? '#2438a8' : '#c47f17') + '"' + (p.wl ? '' : ' stroke="#fffdf8" stroke-width="0.8"') + '/>';
+    });
+    s += '<text x="' + ((L + W - R) / 2).toFixed(1) + '" y="' + (H - 6).toFixed(1) + '" text-anchor="middle">TVL (log scale)</text>';
+    s += '<text x="12" y="' + ((T + H - B) / 2).toFixed(1) + '" text-anchor="middle" transform="rotate(-90 12 ' + ((T + H - B) / 2).toFixed(1) + ')">implied value (log scale)</text>';
+    s += '</svg>';
+    return el('div', { class: 'chart' },
+      el('h3', { text: 'Implied value against TVL' }),
+      el('div', { html: s }),
+      el('p', { class: 'cap', text: 'One dot per row, log scales both ways. Indigo dots are watchlist rows, amber dots are the early radar. The dashed line is the base from TVL alone: a dot above it was lifted by a good week or a long record, a dot below it held back.' })
+    );
+  }
+
+  // The week's moves across the board, binned: most rows had a negative
+  // week, which is why the growth term is damped rather than trusted.
+  var GROWTH_BINS = [[null, -25], [-25, -10], [-10, -5], [-5, 0], [0, 5], [5, 10], [10, 25], [25, 50], [50, null]];
+  function growthHist() {
+    var grows = DATA.rows.map(function (r) { return r.change_7d; }).filter(function (v) { return v !== null && v !== undefined; });
+    var counts = GROWTH_BINS.map(function (bin) {
+      return grows.filter(function (v) { return (bin[0] === null || v > bin[0]) && (bin[1] === null || v <= bin[1]); }).length;
+    });
+    var neg = grows.filter(function (v) { return v < 0; }).length;
+    var sorted = grows.slice().sort(function (a, b) { return a - b; });
+    var median = sorted[Math.floor(sorted.length / 2)];
+    var W = 460, H = 260, L = 34, R = 8, T = 22, B = 40;
+    var max = Math.max.apply(null, counts);
+    var bw = (W - L - R) / counts.length;
+    function label(bin) {
+      if (bin[0] === null) return '<-25';
+      if (bin[1] === null) return '>50';
+      return bin[0] + '–' + bin[1];
+    }
+    var s = '';
+    s += '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Seven-day change across the board">';
+    counts.forEach(function (c, i) {
+      var x = L + i * bw + 3;
+      var w = bw - 6;
+      var h = (c / max) * (H - T - B);
+      var y = H - B - h;
+      var bin = GROWTH_BINS[i];
+      var col = bin[1] !== null && bin[1] <= 0 ? '#2438a8' : (bin[0] !== null && bin[0] >= 50 ? '#c47f17' : '#0f7a4d');
+      s += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + Math.max(1, h).toFixed(1) + '" rx="2" fill="' + col + '"/>';
+      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle">' + c + '</text>';
+      s += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 24).toFixed(1) + '" text-anchor="middle">' + label(bin) + '</text>';
+    });
+    s += '<text x="' + ((L + W - R) / 2).toFixed(1) + '" y="' + (H - 8).toFixed(1) + '" text-anchor="middle">seven-day change, %</text>';
+    s += '</svg>';
+    return el('div', { class: 'chart' },
+      el('h3', { text: 'The week across the board' }),
+      el('div', { html: s }),
+      el('p', { class: 'cap', text: neg + ' of ' + DATA.rows.length + ' rows had a negative week (median ' + fmtPct(median) + '). The growth term mostly holds rows back, so it is damped — weight ' + DATA.model.growth_weight + ', cap ' + DATA.model.growth_cap + ' — instead of letting one noisy week decide a rank.' })
+    );
+  }
+
+  function charts() {
+    return el('section', { class: 'charts' }, scatterChart(), growthHist());
+  }
+
   function controls() {
     var categories = Array.from(new Set(DATA.rows.map(function (r) { return r.category || 'Other'; }))).sort();
     var chains = Array.from(new Set(DATA.rows.reduce(function (acc, r) { return acc.concat(r.chains || []); }, []))).sort();
@@ -341,6 +477,7 @@
           el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' })),
           el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) })
         )),
+        el('td', null, driverCell(r)),
         el('td', null, r.watchlist ? el('span', { class: 'tag', text: 'watchlist' }) : el('span', { class: 'status', text: 'no token' }))
       );
       tbody.appendChild(tr);
@@ -348,7 +485,7 @@
     return el('div', { class: 'panel' },
       el('div', { class: 'table-wrap' },
         el('table', null,
-          el('caption', { class: 'sub', text: 'Pre-token protocols, strongest implied value first. Select a row for its model and farm plan.' }),
+          el('caption', { class: 'sub', text: 'Pre-token protocols, strongest implied value first. Select a row for its model and farm plan. The drivers bar shows how the week (G) and the age (M) push each row away from its TVL base.' }),
           el('thead', null, el('tr', null,
             sortHeader('implied', 'Rank'),
             sortHeader('name', 'Protocol'),
@@ -356,6 +493,7 @@
             sortHeader('growth', '7d'),
             sortHeader('age', 'Age'),
             sortHeader('implied', 'Implied value'),
+            el('th', { scope: 'col', text: 'Why this rank' }),
             el('th', { scope: 'col', text: 'Token' })
           )),
           tbody
@@ -402,7 +540,7 @@
         el('h3', { text: 'Why the growth term is damped' }),
         el('p', { text: 'Seven-day change is the noisiest figure in the snapshot: one row reads +4448.47% in a week, three read above +100%, six above +50%.' }),
         el('p', { text: 'Under the earlier weight of 1.2 and cap of 150, one week could move implied value 2.8x up or 0.4x down — a 7x spread from a single noisy week.' }),
-        el('p', { text: 'Radar-3 uses weight 0.8 and cap 100, so the swing is 1.8x up or 0.6x down. Growth still counts; it just cannot dominate TVL and age.' }),
+        el('p', { text: 'Radar-4 keeps weight 0.8 and cap 100 from radar-3, so the swing is 1.8x up or 0.6x down. Growth still counts; it just cannot dominate TVL and age. The floor and cap bind only four board rows (one below -50%, three above +100%), and 140 of 198 rows had a negative week, so the term mostly holds rows back.' }),
         el('p', { text: 'Only the extreme-growth rows move. The top five do not change, and the top ten are identical:' }),
         el('ul', { class: 'moves' },
           el('li', { text: 'Monolith Market: rank 106 to 145 (+162.86% on $7.2M TVL)' }),
@@ -410,6 +548,12 @@
           el('li', { text: 'Shift DeFi: rank 33 to 44 (+4448.47% on $47.6M TVL)' }),
           el('li', { text: 'Anemoy Capital: rank 148 to 117 — a negative week is punished less' })
         )
+      ),
+      el('div', { class: 'why' },
+        el('h3', { text: 'What changed in radar-4' }),
+        el('p', { text: 'An unlisted age now uses the board’s own median known age, ' + m.unknown_age_days + ' days, instead of an arbitrary 365: the median of the 191 known ages among the 198 board rows. Seven rows carry no listed date; their implied values rise about 3%, 17 rows shift rank by at most four places (Plasma One 85 to 81), and the top ten do not change.' }),
+        el('p', { text: 'Every row now shows why it ranks where it does: the drivers bar in the table splits the gap between its TVL base and its implied value into the week’s slice and the age’s slice, and the detail view spells the same split out in dollars. The age slice is always zero or negative: the base assumes a fully mature four-year record, so every younger protocol sits below it, and only a very young or a fully mature protocol’s age is called out on its own.' }),
+        el('p', { text: 'Two charts were added above the board: implied value against TVL on log scales, with the TVL-only base as a dashed line, and the week’s moves across the board as a histogram. One wording slip was fixed: the weekly-yield farm step read differently in the board and in the page, and now reads the same in both.' })
       ),
       el('p', { class: 'sub', text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. Growth weighs ' + m.growth_weight + ' here, against 0.5 in the starter model, and the TVL term is sub-linear. The early radar is every rankable pre-token protocol below the watchlist floor, and the live-token protocols are set aside with their market caps shown.' })
     );
@@ -426,11 +570,15 @@
     );
   }
 
-  function rankReason(row, calc) {
+  function rankReason(row, d) {
     var growth = row.change_7d === null ? 0 : row.change_7d;
-    if (calc.growthMult >= 1.15) return 'The week lifts it: ' + fmtPct(growth) + ' in seven days multiplies its base by ' + row.growth_multiplier + '.';
-    if (calc.growthMult <= 0.85) return 'The week holds it back: ' + fmtPct(growth) + ' in seven days cuts its base to ' + row.growth_multiplier + ' of itself.';
-    if (calc.maturity >= 0.9) return 'Its long record lifts it: ' + fmtAge(row.age_days) + ' with no token gives a maturity multiplier of ' + row.maturity_multiplier + '.';
+    if (d.growth >= 10) return 'The week lifts it: ' + fmtPct(growth) + ' in seven days adds ' + fmtSigned(d.growth) + ' to its base.';
+    if (d.growth <= -10) return 'The week holds it back: ' + fmtPct(growth) + ' in seven days takes ' + fmtSigned(d.growth) + ' off its base.';
+    // The age slice is always zero or negative: the base assumes a fully
+    // mature four-year record, so only a very young or a fully mature
+    // protocol's age is worth calling out on its own.
+    if (row.age_days !== null && row.age_days < 180) return 'Still young: ' + fmtAge(row.age_days) + ' with no token, so age takes ' + fmtSigned(d.maturity) + ' off its base.';
+    if (row.age_days !== null && row.age_days >= 1460) return 'Fully mature: ' + fmtAge(row.age_days) + ' with no token, so age takes almost nothing off its base (' + fmtSigned(d.maturity) + ').';
     var n = row.chains ? row.chains.length : 1;
     return 'Its TVL does the work: ' + fmtUsd(row.tvl_usd) + ' across ' + n + ' chain' + (n === 1 ? '' : 's') + ', a steady week and a ' + fmtAge(row.age_days) + ' record.';
   }
@@ -443,6 +591,7 @@
     dialog.textContent = '';
     var steps = farmSteps(row);
     var calc = impliedOf(row, DATA.model);
+    var d = driversOf(row);
     var maxBase = Math.max.apply(null, DATA.rows.map(function (r) { return r.base_usd; }));
     dialog.appendChild(el('div', { class: 'detail-head' },
       el('div', null,
@@ -468,8 +617,13 @@
         breakRow('Growth mult', (calc.growthMult / 1.8) * 100, String(row.growth_multiplier)),
         breakRow('Maturity mult', calc.maturity * 100, String(row.maturity_multiplier))
       ),
+      el('div', { class: 'driver-line' },
+        el('span', { text: 'Why it sits here: ' }),
+        driverBar(d, true),
+        el('span', { text: 'Base ' + fmtUsd(row.base_usd) + ' ' + fmtSigned(d.growth) + ' from the week ' + fmtSigned(d.maturity) + ' from age = ' + fmtUsd(row.implied_value_usd) + ' implied.' })
+      ),
       el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(calc.implied) + (calc.implied === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price, and no token launch is promised.' }),
-      el('p', { class: 'sub', text: 'Why rank ' + row.rank + ': ' + rankReason(row, calc) })
+      el('p', { class: 'sub', text: 'Why rank ' + row.rank + ': ' + rankReason(row, d) })
     ));
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
@@ -496,6 +650,7 @@
     if (state.tab === 'pre-token') shell.appendChild(mix());
     if (state.tab === 'pre-token') shell.appendChild(movers());
     if (state.tab === 'pre-token') shell.appendChild(moversNote());
+    if (state.tab === 'pre-token') shell.appendChild(charts());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());

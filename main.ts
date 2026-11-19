@@ -1,4 +1,4 @@
-// Token Radar, model radar-3 (Node 22, standard library only).
+// Token Radar, model radar-4 (Node 22, standard library only).
 //
 // The program reads the sealed snapshot from /input/snapshot.json (or
 // --input <file|dir>), scores every rankable pre-token protocol with the
@@ -27,7 +27,7 @@ const TEXT_MAX_BYTES = 65_536;
 const SCREENSHOT_CAPS = { max: 4, max_bytes: 524_288 };
 const IMAGE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
-/** --name <value> out of the arguments, or the fallback. */
+/** The value of `--name <value>`, or `fallback` when the flag is absent. */
 function arg(name: string, fallback: string): string {
   const at = process.argv.indexOf(`--${name}`);
   if (at >= 0 && at + 1 < process.argv.length) return process.argv[at + 1]!;

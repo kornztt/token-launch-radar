@@ -70,3 +70,98 @@ ahead of an $84M move, and the percentage is still printed small.
   before running check. The resubmission bundle must be rebuilt from
   this session before the parent submits, so the v2 agent's usage row
   attaches (it is written only when this session completes).
+
+## Radar-4 (2026-11-19): per-row drivers, two charts, one principled model change
+
+### The model change: unknown age 365 -> 418 days
+
+The only model change, and it comes from the snapshot's own figures. An
+unlisted age used an arbitrary 365 days. The board's own known ages say
+otherwise: among the 198 board rows, 191 carry a listed date and their
+median is 418 days (mean 470, p25 178, p75 649). Radar-4 scores an
+unlisted protocol as a typical board protocol, not a young one. Only
+seven rows carry no listed date, so the effect is small and measured:
+their implied values rise about 3%, 17 rows shift rank by at most four
+places (Plasma One 85 -> 81), and the top ten do not change.
+
+### What was deliberately not changed
+
+- Growth weight 0.8, cap 100, floor -50: the floor and cap bind only
+  four board rows (one below -50%, three above +100%), and 140 of 198
+  rows had a negative week (median -3.75%), so the term mostly holds
+  rows back already. No further damping is justified.
+- Maturity cap 1460 days: only five board rows are older than four
+  years (oldest 1845 days). Extending the cap would hand those five
+  rows up to 13% more for age alone, which is exactly what the cap
+  exists to stop.
+- TVL exponent 0.85: the scatter chart (below) shows the base line
+  fits the board's shape — the dots cluster around it, and the scatter
+  off it is what growth and age explain. No exponent change is
+  justified by the figures.
+
+### Per-row drivers, visible in the table
+
+Each row now carries a drivers bar in a "Why this rank" column: the
+week's slice and the age's slice of the gap between its TVL base and
+its implied value, on a fixed -100% to +100% scale, green when they
+lift the value and red when they hold it back. The split is exact:
+implied / base - 1 = (growthMult - 1) + growthMult x (maturityMult - 1),
+so the two slices always add up to the gap. The same split is spelled
+out in dollars in the detail view ("Base $59.2M +4.5% from the week
+-32.8% from age = $42.5M implied"), and the rank reason in the detail
+view now uses the slices instead of the raw multipliers. The age slice
+is always zero or negative — the base assumes a fully mature four-year
+record — so the reason text only calls a protocol's age out on its own
+when it is very young (under 180 days) or fully mature (1460 days or
+more); anything in between is reported as TVL doing the work. The bar and
+the board share one function (drivers() in lib/model.ts), so they
+cannot disagree.
+
+### Two charts above the board
+
+- Implied value against TVL, both on log scales: one dot per row
+  (indigo watchlist, amber early radar) with the TVL-only base
+  (implied = TVL^0.85 x 0.9) as a dashed line. A dot above the line
+  was lifted by a good week or a long record; a dot below it was held
+  back. Both charts are drawn from data.js at render time, so they
+  always show the board that was scored.
+- The week's moves across the board, as a histogram in nine bins:
+  4 / 40 / 35 / 61 / 33 / 9 / 7 / 1 / 6 rows from under -25% to over
+  +50%. The caption states the fact the chart shows: 140 of 198 rows
+  had a negative week, which is why the growth term is damped.
+
+### A wording slip fixed
+
+The weekly-yield farm step read "the weekly yield" in board.json and
+"the week's yield" in the page. Both now read "the week's yield", so
+the board and the page agree word for word. (Found by diffing the two
+derivations while rewriting them; the strings are otherwise identical.)
+
+### Mobile and UX
+
+- The charts stack to one column under 900px and scale by viewBox, so
+  they stay legible on a phone.
+- The lede heading drops to 24px under 900px (it was 30px at every
+  width and crowded the first screen).
+- The drivers column adds width to the table; the table already
+  scrolls horizontally inside its panel, so nothing overflows.
+
+## Validation (radar-4, rebuilt 2026-11-19)
+
+- Board: 198 rows, watchlist 40/40, implied strictly non-increasing,
+  farm steps 3-12 per row, 20-600 characters each (observed 124-210),
+  no violations. Top 5 unchanged from radar-3.
+- Dossier 1,473,939 bytes (cap 1,572,864); dashboard source 55,881
+  bytes (text cap 65,536); screenshots 325,045 / 411,735 / 325,398
+  bytes (each under the 512 KiB cap), 1440x1440, retaken from the
+  rebuilt dashboard with headed Firefox under Xvfb.
+- Browser verification (retake-shots-r4.js, 11 checks, all passed):
+  198 rows rendered, 198 scatter dots, 9 histogram bars, 198 driver
+  cells, rank-1 drivers text "G -1.7% · M -30.9%", detail driver line
+  "Base $95.1M -1.7% from the week -30.9% from age = $64.1M implied",
+  the page's six farm steps byte-identical to board.json for the
+  opened row, 34 rows under the Risk Curators filter, zero page errors.
+  One fix found by viewing the shots: the histogram's bin labels ran
+  together ("-25 to -10 to -5 ..."), so they now read "-25–-10" and
+  the shots were retaken.
+- Kit check: the parent runs it from this session's bundle.
