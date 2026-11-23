@@ -1,10 +1,128 @@
-# Token Radar — model radar-5 design record
+# Token Radar — model radar-6 design record
 
-Radar-5 is the third revision of this entry (radar-4 was the submitted
-version, 2026-11-19, rank 8,667 of 17,174 in a field of 17,176 — squarely
-mid-field). Every change below is derived from the sealed 2026-11-14
-snapshot's own figures; no protocol name is special-cased, no outside
-data was fetched, and the snapshot itself was not modified.
+Radar-6 is the fourth revision of this entry (radar-5 was the submitted
+version, 2026-11-23, thinking_reproduces 50.5%). It fixes five problems
+the judges found in the radar-5 review, and nothing else: the snapshot,
+the TVL term and the accounted view are unchanged.
+
+## Radar-6 (2026-11-23): winsorized growth, peer scatter, exact wording, specific farms
+
+1. **The board shot shows table rows.** The radar-5 board and filtered
+   shots cut off at the table header — only "198 rows shown" was visible.
+   The retake script now scrolls the filter bar to the top of the shot
+   before shooting, so the board shot shows the header and ranks 1–10 and
+   the filtered shot shows its first rows; the script also asserts at
+   least 10 rows are in the viewport (11 rows in each retaken shot).
+2. **The week's move is winsorized to ±20%.** The growth term was
+   `clamp(change_7d, -50, 100)` with weight 0.8, so one week could move
+   a row's value 1.8x. Shift DeFi's +4448.47% week — a data spike the
+   page itself calls out — ate the whole cap and sat at rank 35, where
+   no growth at all would put it at 91. Radar-6 clamps the week to
+   ±20%, so no single week can move a row by more than 16% either way
+   (growth multiplier 0.84–1.16); nine rows read above +20% and five
+   below −20%, so the term binds 14 board rows. Shift DeFi falls to
+   rank 62 — the capped +20% week still lifts it 29 places above its
+   no-growth rank, exactly as any other +20% week would: the spike no
+   longer gets special treatment.
+3. **The scatter draws the peers, not the model.** Radar-5 plotted the
+   model's own implied value against its own TVL input, so the dots
+   hugged the dashed base line by construction. Radar-6 plots the 95
+   live-token peers' real market caps against their real TVLs, with the
+   peer fit (slope 0.46, log10 intercept 3.5291) as the dashed line, and
+   the caption states R² 0.17 and the factor-of-seven held-out error.
+   The peers are the fit's own points: a live-token protocol with a
+   market cap, a TVL and a listed date, and a zero market cap does not
+   count — 11 protocols record mcap 0 with a listed date, and log10(0)
+   is not a point. A pre-existing rendering bug found while reworking
+   the chart is fixed too: the horizontal gridlines' far end used the
+   range top instead of the row's own value, so they sloped up to the
+   top-right corner; they are horizontal now, and the browser check
+   asserts every gridline is straight.
+4. **"No token" becomes "no token on record", everywhere.** RULES.txt
+   says DefiLlama's record is not proof, so a protocol records no
+   token — never that it has none. The board's row label, the detail
+   facts and the rank reasons all read "no token on record" now, and
+   every detail view states: "Token status: no token on record in the
+   2026-11-14 snapshot. The snapshot record is not proof of whether a
+   protocol has issued a token." That covers USDD at rank 5, whose
+   first impression the label used to overstate.
+5. **Farm plans name the protocol, its chain and its own action.**
+   Radar-5's steps 1 and 4–6 were the same text on all 198 rows, step 2
+   fell back to a generic deposit on 17 rows, and the weekly action
+   fell back on 48. Radar-6 adds a rule per category family — index,
+   liquidity manager, leveraged farming / farm, payments, OTC, CeDeFi,
+   BTC-anchored, governance incentives, crypto card — so step 2 has a
+   specific action on all 198 rows and the weekly action on all 198,
+   and steps 1, 4, 5 and 6 name the protocol and its chain. The wording
+   stays word for word identical between lib/model.ts (board.json) and
+   dashboard/app.js (the page); the browser check opens a former
+   fallback row (Lightning Network) and compares its six steps
+   byte for byte.
+
+## What the winsorized growth does to the board
+
+Top 5 unchanged in identity, order and implied value; top 10 identical
+in identity, order and implied value — every top-10 week lies inside
+±20%. Nine rows move 5 places or more, seven move 20 or more, and all
+seven are extreme-week rows (the 14 bound rows and their neighbours):
+
+| Protocol | Week | Rank radar-5 → radar-6 | Implied value |
+|---|---|---|---|
+| Shift DeFi | +4448.47% | 35 → 62 | $10,081,062 → $6,496,684 |
+| NUVA | +160.80% | 76 → 130 | $6,148,675 → $3,962,479 |
+| Theo Network thBill | +94.01% | 77 → 124 | $6,138,284 → $4,063,944 |
+| Monolith Market | +162.86% | 120 → 165 | $4,288,007 → $2,763,382 |
+| August Digital | +77.98% | 66 → 105 | $6,351,224 → $4,537,009 |
+| Manifest Trade | +73.65% | 89 → 122 | $5,660,627 → $4,131,798 |
+| Anemoy Capital | −72.71% | 141 → 92 | $3,702,760 → $5,183,864 |
+
+Anemoy Capital moves the other way: the floor side of the winsorized
+term counts its −72.71% week as −20% instead of −50%. Against a
+no-growth board, rows moving 20 places or more fall from 12 under
+radar-5 to 9 under radar-6; the residual is the capped ±16% in the
+board's dense regions, not spikes — the largest single-week effect on
+any row is now 0.16, against 0.80 before.
+
+## Validation (radar-6, rebuilt 2026-11-23)
+
+- Board: 198 rows, watchlist 40/40, implied strictly non-increasing,
+  farm steps 3-12 per row, 20-600 characters each, no violations.
+  Growth multiplier 0.84–1.16 on every row; Shift DeFi rank 62.
+- Gate script (scratch, /tmp/radar6-gate-check.ts): dossier byte-identical
+  on rebuild, board rows/slugs/ranks/order, watchlist coverage, farm
+  steps, accounted total 758 with no overlap and no gaps, dashboard
+  source 64,770 bytes (cap 65,536), dossier 1,446,318 bytes (cap
+  1,572,864), screenshots 309,770 / 414,767 / 310,144 bytes (each under
+  the 512 KiB cap), page-side recompute of every row matches board.json
+  (0 mismatches), peers 95 with all market caps above zero, step 2
+  names its protocol on 198/198 rows, weekly generic fallback on 0
+  rows. All checks passed.
+- Dossier 1,446,318 bytes (cap 1,572,864); dashboard source 64,770
+  bytes (text cap 65,536); screenshots 309,770 / 414,767 / 310,144
+  bytes (each under the 512 KiB cap), 1440x1440, retaken from the
+  rebuilt dashboard with headed Firefox under Xvfb.
+- Browser verification (retake-shots-r6.js, 28 checks, all passed):
+  198 rows rendered, 95 scatter dots, 9 histogram bars, 198 driver
+  cells, rank-1 drivers text "G -1.7% · M -30.9%", checks strip 5 items
+  stating "758 / 758" and slope "0.46", board shot shows 11 table rows
+  in the viewport, Shift DeFi rank 62, row label "no token on record",
+  detail farm steps byte-identical to board.json for the opened row,
+  detail farm verdict "Farm verdict: $150 in, about $8 of gas to set
+  up, hold at least 30 days, claim the week's yield and put it back in
+  once a week — for an implied value of $55,701,963.", detail driver
+  line "Base $82.7M -1.7% from the week -30.9% from age = $55.7M
+  implied", USDD detail states the snapshot record is not proof,
+  Lightning Network farm steps byte-identical to board.json, 34 rows
+  under the Risk Curators filter with 11 rows in the filtered shot,
+  536 accounted rows with reasons, 24 live rows, scatter gridlines
+  straight, zero page errors. All three screenshots were viewed: the
+  board shot shows the peer scatter, the filters, the table header and
+  ranks 1–10; the detail shot shows the verdict box, the token-status
+  caveat and the six steps; the filtered shot shows Risk Curators rows.
+- Kit check: the parent runs it from this session's bundle at submit
+  time; the local kit copy is level 14 while the site is at level 37
+  (flagged to the parent — the kit was not re-downloaded in this
+  session).
 
 ## Where radar-4 stood
 

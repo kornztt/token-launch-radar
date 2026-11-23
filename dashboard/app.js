@@ -1,4 +1,4 @@
-// Token Radar, radar-5 dashboard. It reads window.RADAR (written beside
+// Token Radar, radar-6 dashboard. It reads window.RADAR (written beside
 // dashboard/ by main.ts) and renders the ranked board, a filterable table
 // with a per-row drivers column, two charts that make the ranking legible,
 // a checks strip that states the model's fit and its limits, a per-protocol
@@ -37,7 +37,7 @@
     return (n > 0 ? '+' : '') + n.toFixed(digits === undefined ? 1 : digits) + '%';
   }
 
-  // The radar-5 model in one function: the page recomputes a row from the
+  // The radar-6 model in one function: the page recomputes a row from the
   // snapshot figures and checks the number board.json carries, so the page's
   // code and the board's data are visibly the same arithmetic. A missing
   // week scores as the board's median week, the same default the model
@@ -107,8 +107,10 @@
     return 30;
   }
   // One rule per category family: the first matching test wins, and the
-  // fallback covers every category the table does not name.
+  // fallback covers every category the table does not name. 'Indexes'
+  // contains 'dex', so the index rule comes first.
   var ACTION_RULES = [
+    [/index/, function (name, capital, chain) { return 'Buy $' + capital + ' of the ' + name + ' index on ' + chain + ' and hold it.'; }],
     [/lend|cdp|collateral/, function (name, capital, chain) { return 'Lend $' + capital + ' of USDC on ' + name + ' (' + chain + ') and leave the loan position open.'; }],
     [/dex|amm|swap/, function (name, capital, chain) { return 'Add $' + capital + ' of liquidity to ' + name + "'s main pool on " + chain + ' and leave the position in range.'; }],
     [/bridge/, function (name, capital, chain) { return 'Move $' + capital + ' of USDC to ' + chain + ' through ' + name + ', then put the bridged funds to work inside its app.'; }],
@@ -118,8 +120,16 @@
     [/curator|allocator|vault/, function (name, capital, chain) { return 'Put $' + capital + ' into a ' + name + ' vault on ' + chain + ' and hold the vault shares.'; }],
     [/yield/, function (name, capital, chain) { return 'Put $' + capital + " into " + name + "'s main yield strategy on " + chain + ' and leave the position open.'; }],
     [/stable/, function (name, capital, chain) { return 'Mint or hold $' + capital + ' of the stable asset through ' + name + ' on ' + chain + '.'; }],
-    [/rwa/, function (name, capital, chain) { return 'Mint $' + capital + " of the protocol's yield-bearing asset on " + chain + ' and hold it.'; }],
+    [/rwa/, function (name, capital, chain) { return 'Mint $' + capital + " of " + name + "'s yield-bearing asset on " + chain + ' and hold it.'; }],
     [/insurance/, function (name, capital, chain) { return 'Buy $' + capital + ' of cover from ' + name + ' on ' + chain + ' and keep the policy live.'; }],
+    [/liquidity manager/, function (name, capital, chain) { return 'Add $' + capital + " of liquidity through " + name + "'s managed vaults on " + chain + ' and leave it in range.'; }],
+    [/leverag|farm/, function (name, capital, chain) { return 'Put $' + capital + ' into a ' + name + ' farm on ' + chain + ' and leave the position open.'; }],
+    [/payments/, function (name, capital, chain) { return 'Route $' + capital + ' of payments through ' + name + ' on ' + chain + ' and keep the wallet active.'; }],
+    [/otc/, function (name, capital, chain) { return 'Place a $' + capital + " order on " + name + "'s OTC desk on " + chain + '.'; }],
+    [/cedefi/, function (name, capital, chain) { return 'Put $' + capital + ' into ' + name + "'s CeDeFi strategy on " + chain + ' and leave the position open.'; }],
+    [/anchor|decentralized btc/, function (name, capital, chain) { return 'Mint or hold $' + capital + ' of the BTC-anchored asset through ' + name + ' on ' + chain + '.'; }],
+    [/governance/, function (name, capital, chain) { return 'Stake $' + capital + ' with ' + name + ' on ' + chain + ' to earn its governance incentives.'; }],
+    [/card/, function (name, capital, chain) { return 'Top up a ' + name + ' card with $' + capital + ' on ' + chain + ' and spend from it.'; }],
     [/chain/, function (name, capital) { return 'Bridge $' + capital + ' of USDC to ' + name + ' and try one app built on it.'; }]
   ];
   function actionFor(p, capital, chain) {
@@ -130,12 +140,24 @@
     return 'Put $' + capital + ' of USDC into ' + p.name + ' on ' + chain + ' and leave the position open.';
   }
   var WEEKLY_RULES = [
-    [/lend|cdp/, 'borrow a little against the deposit and pay it back'],
+    [/index/, 'rebalance the index position once'],
+    [/lend|cdp|collateral/, 'borrow a little against the deposit and pay it back'],
     [/dex|amm|swap/, 'swap a little through the pool'],
     [/bridge/, 'bridge a little in either direction'],
     [/perpetual|derivative|basis/, 'trim the hedge by a little'],
     [/prediction/, 'settle or open one small market position'],
-    [/yield|curator|allocator|vault/, "claim the week's yield and put it back in"]
+    [/yield|curator|allocator|vault|rwa|stable/, "claim the week's yield and put it back in"],
+    [/staking pool|restak/, "restake the week's rewards"],
+    [/insurance/, 'check the cover stays live'],
+    [/liquidity manager/, 'rebalance the managed position once'],
+    [/leverag|farm/, 'harvest the farm rewards and put them back in'],
+    [/payments/, 'route one small payment'],
+    [/otc/, 'check for a new OTC listing'],
+    [/cedefi/, "check the CeDeFi yield and compound it"],
+    [/anchor|decentralized btc/, 'check the BTC peg and top up a little'],
+    [/governance/, 'vote once on a governance proposal'],
+    [/card/, 'spend a little on the card'],
+    [/chain/, 'try one app built on it once']
   ];
   function weeklyFor(p) {
     var c = (p.category || '').toLowerCase();
@@ -156,12 +178,12 @@
     var hold = holdDaysFor(p.age_days);
     var gas = capital >= 150 ? 8 : 4;
     return [
-      { text: 'Open a fresh wallet on ' + chain + ' to use only for this farm, and write its seed phrase on paper and keep it somewhere safe offline.', cost: 'about $3 of gas for the first transaction', time: '5 minutes' },
+      { text: 'Open a fresh wallet on ' + chain + ' to farm ' + p.name + ', and write its seed phrase on paper and keep it somewhere safe offline.', cost: 'about $3 of gas for the first transaction', time: '5 minutes' },
       { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital, plus about $' + gas + ' of gas', time: '15 minutes to set up' },
       { text: 'Once a week, ' + weeklyFor(p) + ', so the wallet shows steady use instead of a single deposit.', cost: 'roughly $2 of gas a week', time: '10 minutes a week' },
-      { text: 'Keep the position open for at least ' + hold + ' days so the activity covers more than one snapshot.', cost: 'the $' + capital + ' stays locked in the position', time: hold + ' days' },
-      { text: "When you are ready to withdraw, check the protocol's own points or rewards page first and claim only from the link it publishes; never pay anyone to claim on your behalf.", cost: 'free to check, and never pay to claim', time: '10 minutes' },
-      { text: 'Keep a farm log of the wallet, the dates and every transaction hash, so you can repeat the position or unwind it cleanly.', cost: 'free, apart from the log', time: '5 minutes' }
+      { text: 'Keep the $' + capital + ' position on ' + chain + ' open for at least ' + hold + ' days so the activity covers more than one snapshot.', cost: 'the $' + capital + ' stays locked in the position', time: hold + ' days' },
+      { text: 'When you are ready to withdraw from ' + p.name + ", check its own points or rewards page first and claim only from the link it publishes; never pay anyone to claim on your behalf.", cost: 'free to check, and never pay to claim', time: '10 minutes' },
+      { text: 'Keep a farm log for the ' + p.name + ' position on ' + chain + ': the wallet, the dates and every transaction hash, so you can repeat the position or unwind it cleanly.', cost: 'free, apart from the log', time: '5 minutes' }
     ].map(stepText);
   }
   // The farm verdict: what the plan costs to run, in one line. It scores
@@ -363,21 +385,23 @@
     return h('div', { class: 'driver', title: title }, [driverBar(d, false), h('span', { text: label })]);
   }
 
-  // Implied value against TVL, both on log scales: one dot per row,
-  // watchlist rows indigo, early rows amber. The dashed line is the base
-  // from TVL alone (implied = TVL^0.5 x 1575); a dot above it was lifted by
-  // a good week or a long record, a dot below it held back. The line is
-  // straight because the base is a power law.
+  // Market cap against TVL for the 95 live-token peers: real market caps
+  // against real TVLs, both on log scales. The dashed line is the peer
+  // fit (slope 0.46, intercept 3.53 in log10); the scatter around it is
+  // the evidence, R-squared 0.17, and a measure of how weak it is. This
+  // chart shows the peers' own numbers, never the model's output against
+  // its own input, so a tight hug of the line would have meant the
+  // model, not the market.
   function scatterChart() {
     var W = 620, H = 330, L = 58, R = 14, T = 14, B = 38;
-    var pts = DATA.rows.map(function (r) { return { x: Math.log10(r.tvl_usd), y: Math.log10(r.implied_value_usd), wl: r.watchlist }; });
+    var pts = DATA.peers.map(function (p) { return { x: Math.log10(p.tvl_usd), y: Math.log10(p.mcap_usd) }; });
     var xs = pts.map(function (p) { return p.x; });
     var ys = pts.map(function (p) { return p.y; });
     var x0 = Math.floor(Math.min.apply(null, xs) * 2) / 2 - 0.1;
     var x1 = Math.ceil(Math.max.apply(null, xs) * 2) / 2 + 0.1;
-    var b = Math.log10(DATA.model.base_scale);
-    var lineY0 = DATA.model.base_exponent * x0 + b;
-    var lineY1 = DATA.model.base_exponent * x1 + b;
+    var b = DATA.fit.intercept;
+    var lineY0 = DATA.fit.slope * x0 + b;
+    var lineY1 = DATA.fit.slope * x1 + b;
     var y0 = Math.floor(Math.min(Math.min.apply(null, ys), lineY0) * 2) / 2 - 0.1;
     var y1 = Math.ceil(Math.max(Math.max.apply(null, ys), lineY1) * 2) / 2 + 0.1;
     var X = function (v) { return L + (v - x0) / (x1 - x0) * (W - L - R); };
@@ -388,27 +412,27 @@
       return '$' + Math.round(Math.pow(10, v - 3)) + 'K';
     }
     var parts = [];
-    parts.push('<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Implied value against TVL, log scales">');
+    parts.push('<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Market cap against TVL for the 95 live-token peers, log scales">');
     for (var tx = Math.ceil(x0); tx <= Math.floor(x1); tx++) {
       parts.push('<line x1="' + X(tx).toFixed(1) + '" y1="' + Y(y0).toFixed(1) + '" x2="' + X(tx).toFixed(1) + '" y2="' + Y(y1).toFixed(1) + '" stroke="#e5ddc9" stroke-width="1"/>');
       parts.push('<text x="' + X(tx).toFixed(1) + '" y="' + (H - 22).toFixed(1) + '" text-anchor="middle">' + moneyTick(tx) + '</text>');
     }
     for (var ty = Math.ceil(y0); ty <= Math.floor(y1); ty++) {
-      parts.push('<line x1="' + X(x0).toFixed(1) + '" y1="' + Y(ty).toFixed(1) + '" x2="' + X(x1).toFixed(1) + '" y2="' + Y(y1).toFixed(1) + '" stroke="#e5ddc9" stroke-width="1"/>');
+      parts.push('<line x1="' + X(x0).toFixed(1) + '" y1="' + Y(ty).toFixed(1) + '" x2="' + X(x1).toFixed(1) + '" y2="' + Y(ty).toFixed(1) + '" stroke="#e5ddc9" stroke-width="1"/>');
       parts.push('<text x="' + (L - 8).toFixed(1) + '" y="' + (Y(ty) + 3).toFixed(1) + '" text-anchor="end">' + moneyTick(ty) + '</text>');
     }
     parts.push('<line x1="' + X(x0).toFixed(1) + '" y1="' + Y(lineY0).toFixed(1) + '" x2="' + X(x1).toFixed(1) + '" y2="' + Y(lineY1).toFixed(1) + '" stroke="#c47f17" stroke-width="1.5" stroke-dasharray="6 4"/>');
-    parts.push('<text x="' + (X(x1) - 4).toFixed(1) + '" y="' + (Y(lineY1) - 8).toFixed(1) + '" text-anchor="end" fill="#c47f17">base from TVL alone</text>');
+    parts.push('<text x="' + (X(x1) - 4).toFixed(1) + '" y="' + (Y(lineY1) - 8).toFixed(1) + '" text-anchor="end" fill="#c47f17">peer fit, slope 0.46</text>');
     pts.forEach(function (p) {
-      parts.push('<circle cx="' + X(p.x).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="' + (p.wl ? 3.5 : 3) + '" fill="' + (p.wl ? '#2438a8' : '#c47f17') + '"' + (p.wl ? '' : ' stroke="#fffdf8" stroke-width="0.8"') + '/>');
+      parts.push('<circle cx="' + X(p.x).toFixed(1) + '" cy="' + Y(p.y).toFixed(1) + '" r="3" fill="#2438a8"/>');
     });
     parts.push('<text x="' + ((L + W - R) / 2).toFixed(1) + '" y="' + (H - 6).toFixed(1) + '" text-anchor="middle">TVL (log scale)</text>');
-    parts.push('<text x="12" y="' + ((T + H - B) / 2).toFixed(1) + '" text-anchor="middle" transform="rotate(-90 12 ' + ((T + H - B) / 2).toFixed(1) + ')">implied value (log scale)</text>');
+    parts.push('<text x="12" y="' + ((T + H - B) / 2).toFixed(1) + '" text-anchor="middle" transform="rotate(-90 12 ' + ((T + H - B) / 2).toFixed(1) + ')">market cap (log scale)</text>');
     parts.push('</svg>');
     return h('div', { class: 'chart' }, [
-      h('h3', { text: 'Implied value against TVL' }),
+      h('h3', { text: 'Market cap against TVL: the 95 live-token peers' }),
       h('div', { html: parts.join('') }),
-      h('p', { class: 'cap', text: 'One dot per row, log scales both ways. Indigo dots are watchlist rows, amber dots are the early radar. The dashed line is the base from TVL alone: a dot above it was lifted by a good week or a long record, a dot below it held back.' })
+      h('p', { class: 'cap', text: 'Each dot is a real protocol whose token already trades: its market cap against its TVL, log scales both ways. The dashed line is the peer fit, slope 0.46 ± 0.11 with R² 0.17 — TVL alone leaves most of the spread unexplained, and a held-out guess is typically off by a factor of seven. This is the evidence for the TVL term, and a measure of how weak it is.' })
     ]);
   }
 
@@ -554,7 +578,7 @@
           h('span', { class: 'num', text: money(r.implied_value_usd) })
         ])]),
         h('td', null, [driverCell(r)]),
-        h('td', null, [r.watchlist ? h('span', { class: 'tag', text: 'watchlist' }) : h('span', { class: 'status', text: 'no token' })])
+        h('td', null, [r.watchlist ? h('span', { class: 'tag', text: 'watchlist' }) : h('span', { class: 'status', text: 'no token on record' })])
       ]);
     }));
     return h('div', { class: 'panel' }, [h('div', { class: 'table-wrap' }, [
@@ -636,14 +660,14 @@
       h('div', { class: 'why' }, [
         h('h3', { text: 'What the peers cannot separate' }),
         h('p', { text: 'Adding growth and age to the peer regression lifts R-squared only from 0.17 to 0.19, and their fitted signs come out negative — a size confound, since the biggest live protocols grow slowest and have run longest — not a finding that a good week or a long record lowers value. A term the data cannot separate from size stays a damped, stated term: growth weight ' + m.growth_weight + ' with cap ' + m.growth_cap + ', maturity floor ' + m.maturity_floor + ' over ' + m.maturity_days + ' days.' }),
-        h('p', { text: 'Seven-day change is the noisiest figure in the snapshot: one row reads +4448.47% in a week, three read above +100%, six above +50%. The floor and cap bind only four board rows (one below -50%, three above +100%), and 140 of 198 rows had a negative week, so the term mostly holds rows back rather than lifting them.' })
+        h('p', { text: 'Seven-day change is the noisiest figure in the snapshot: one row reads +4448.47% in a week, nine read above +20% and five below -20%. The growth term is winsorized to ±20% — the floor and cap bind 14 board rows — so no single week can move a row by more than 16% either way, and 140 of 198 rows had a negative week, so the term mostly holds rows back rather than lifting them.' })
       ]),
       h('div', { class: 'why' }, [
-        h('h3', { text: 'What changed in radar-5' }),
-        h('p', { text: 'The TVL exponent moved from 0.85 to 0.5 on the peer fit above; the top ten overlap nine of ten with radar-4, and the board tells the same story with less noise from size. A missing week now scores as the board’s median week, ' + pct(m.null_growth_pct) + ', instead of a flat week — the same logic as the unknown-age default of ' + m.unknown_age_days + ' days, which is the board’s median known age. The accounted view lists every protocol the board and the live view do not show, with its reason, so all 758 protocols are somewhere on the page. The checks strip above states the fit on the cover, and each detail view now carries a one-line farm verdict with what the plan costs to run.' }),
+        h('h3', { text: 'What changed in radar-6' }),
+        h('p', { text: 'The growth term is winsorized to ±20%: the +4448% week that used to eat the whole 1.8x cap now counts as +20%, and Shift DeFi falls from rank 35 to 62 — where no growth at all would put it at 91. The scatter now draws the 95 live-token peers’ real market caps against their TVLs, with the peer fit, instead of the model’s own output against its own input. Farm plans name the protocol and its chain in every step, and every category family has its own action, so no row falls back to a generic deposit. Token status reads “no token on record” everywhere, and each detail view states that the snapshot record is not proof of whether a protocol has issued a token.' }),
         h('p', { text: 'Every row now shows why it ranks where it does: the drivers bar in the table splits the gap between its TVL base and its implied value into the week’s slice and the age’s slice, and the detail view spells the same split out in dollars. The age slice is always zero or negative: the base assumes a fully mature four-year record, so every younger protocol sits below it, and only a very young or a fully mature protocol’s age is called out on its own.' })
       ]),
-      h('p', { class: 'sub', text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days, and a missing week uses the board’s median week. The early radar is every rankable pre-token protocol below the watchlist floor, and the live-token protocols are set aside with their market caps shown.' })
+      h('p', { class: 'sub', text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token on record; an unlisted age uses ' + m.unknown_age_days + ' days, and a missing week uses the board’s median week. The early radar is every rankable pre-token protocol below the watchlist floor, and the live-token protocols are set aside with their market caps shown.' })
     ]);
   }
 
@@ -666,8 +690,8 @@
     // The age slice is always zero or negative: the base assumes a fully
     // mature four-year record, so only a very young or a fully mature
     // protocol's age is worth calling out on its own.
-    if (row.age_days !== null && row.age_days < 180) return 'Still young: ' + ageStr(row.age_days) + ' with no token, so age takes ' + signedPct(d.maturity) + ' off its base.';
-    if (row.age_days !== null && row.age_days >= 1460) return 'Fully mature: ' + ageStr(row.age_days) + ' with no token, so age takes almost nothing off its base (' + signedPct(d.maturity) + ').';
+    if (row.age_days !== null && row.age_days < 180) return 'Still young: ' + ageStr(row.age_days) + ' with no token on record, so age takes ' + signedPct(d.maturity) + ' off its base.';
+    if (row.age_days !== null && row.age_days >= 1460) return 'Fully mature: ' + ageStr(row.age_days) + ' with no token on record, so age takes almost nothing off its base (' + signedPct(d.maturity) + ').';
     var n = row.chains ? row.chains.length : 1;
     return 'Its TVL does the work: ' + money(row.tvl_usd) + ' across ' + n + ' chain' + (n === 1 ? '' : 's') + ', a steady week and a ' + ageStr(row.age_days) + ' record.';
   }
@@ -694,7 +718,7 @@
     var facts = [
       ['TVL', money(row.tvl_usd)],
       ['Seven-day growth', pct(row.change_7d)],
-      ['Age with no token', ageStr(row.age_days)],
+      ['Age with no token on record', ageStr(row.age_days)],
       ['Base (TVL^0.5 x 1575)', money(row.base_usd)],
       ['Growth multiplier', String(row.growth_multiplier)],
       ['Maturity multiplier', String(row.maturity_multiplier)],
@@ -705,7 +729,7 @@
     }));
     var breakdown = h('div', { class: 'breakdown' }, [
       breakRow('Base', (row.base_usd / maxBase) * 100, money(row.base_usd)),
-      breakRow('Growth mult', (calc.growthMult / 1.8) * 100, String(row.growth_multiplier)),
+      breakRow('Growth mult', (calc.growthMult / 1.16) * 100, String(row.growth_multiplier)),
       breakRow('Maturity mult', calc.maturity * 100, String(row.maturity_multiplier))
     ]);
     var driverLine = h('div', { class: 'driver-line' }, [
@@ -720,6 +744,7 @@
       breakdown,
       driverLine,
       h('p', { class: 'sub', text: recomputeNote }),
+      h('p', { class: 'sub', text: 'Token status: no token on record in the 2026-11-14 snapshot. The snapshot record is not proof of whether a protocol has issued a token.' }),
       h('p', { class: 'sub', text: 'Why rank ' + row.rank + ': ' + rankReason(row, d) })
     ]);
     var stepItems = steps.map(function (s) {

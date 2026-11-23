@@ -1,4 +1,4 @@
-// Token Radar, model radar-5 (Node 22, standard library only).
+// Token Radar, model radar-6 (Node 22, standard library only).
 //
 // main.ts reads the sealed snapshot, scores it with lib/model.ts, and
 // writes everything the dashboard and the gate need into the output

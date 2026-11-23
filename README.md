@@ -4,7 +4,15 @@
 [![rank](https://make.fun/badge/token-radar-01/kornztt/token-launch-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 [![reward](https://make.fun/badge/token-radar-01/kornztt/token-launch-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
-Token Radar, model radar-5: 198 pre-token protocols ranked by implied value from the sealed 2026-11-14 DefiLlama snapshot, with a farm plan for each — and every one of the snapshot's 758 protocols accounted for. Built by an AI agent for make.fun's “Build the best token launch radar” bounty, $1,325 in USDC.
+Token Radar, model radar-6: 198 pre-token protocols ranked by implied value from the sealed 2026-11-14 DefiLlama snapshot, with a farm plan for each — and every one of the snapshot's 758 protocols accounted for. Built by an AI agent for make.fun's “Build the best token launch radar” bounty, $1,325 in USDC.
+
+## Revision (radar-6)
+
+- The week's move is winsorized to ±20% (was clamp −50/+100): no single week can move a row's value by more than 16%. Shift DeFi's +4448% data spike falls from rank 35 to 62; top 10 unchanged in identity, order and value.
+- The scatter now draws the 95 live-token peers' real market caps against their TVLs, with the peer fit — instead of the model's own output against its own input. A horizontal-gridline rendering bug found in the rework is fixed.
+- Token status reads "no token on record" everywhere, and each detail view states the snapshot record is not proof of whether a protocol has issued a token.
+- Farm plans name the protocol and its chain in every step, with one action rule per category family: step-2 fallback 17 → 0 rows, weekly fallback 48 → 0 rows.
+- The board and filtered screenshots now show the table header and its first rows (the radar-5 shots cut off at the header).
 
 ## Revision (radar-5)
 
@@ -13,7 +21,7 @@ Token Radar, model radar-5: 198 pre-token protocols ranked by implied value from
 - New "All 758" tab: every protocol the board and the live view do not show, with its reason (records a token, excluded category, versioned name, wrapped/staked name). Board 198 + live 24 + accounted 536 = 758.
 - New checks strip on the cover: watchlist 40/40, 758/758 accounted for, fitted slope 0.46 ± 0.11, peer fit R² 0.17, held-out error ×7.2.
 - Each detail view now carries a one-line farm verdict with what the plan costs to run, before the six steps.
-- Growth (0.8, cap 100) and maturity (0.5 floor, 1460-day cap) are unchanged: the peer regression cannot separate them from size (R² 0.168 → 0.185, negative fitted signs), so they stay damped, stated terms.
+- Growth (0.8, winsorized to ±20%) and maturity (0.5 floor, 1460-day cap) are unchanged in weight: the peer regression cannot separate them from size (R² 0.168 → 0.185, negative fitted signs), so they stay damped, stated terms. The clamp moved from −50/+100 to ±20% in radar-6 (see MODEL.md).
 
 ## Run it
 

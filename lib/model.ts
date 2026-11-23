@@ -14,14 +14,15 @@
 // listed with its reason in the dashboard's accounted view, so all 758
 // protocols in the snapshot are somewhere on the page.
 //
-// Implied value follows only from the snapshot's own figures, and radar-5
-// changes one term on the peers' evidence:
+// Implied value follows only from the snapshot's own figures, and radar-6
+// winsorizes the week (radar-5 fitted the TVL slope on the peers' evidence):
 //
 //   base     = round(tvl ^ 0.5 * 1575)      the TVL slope is fitted, not picked
-//   week     = clamp(change_7d, -50, 100)   in percent
-//   growth   = 1 + (week / 100) * 0.8       one week is the noisiest figure
-//                                           in the snapshot, so it may move
-//                                           value 1.8x at most
+//   week     = clamp(change_7d, -20, 20)    in percent, winsorized: one week
+//                                           is the noisiest figure in the
+//                                           snapshot, so it may move value
+//                                           1.16x at most, never 1.8x
+//   growth   = 1 + (week / 100) * 0.8
 //   maturity = 0.5 + 0.5 * min(age, 1460) / 1460
 //                                           a protocol that has run up to
 //                                           four years with no token scores
@@ -46,7 +47,13 @@
 // size confound (the biggest live protocols grow slowest and have run
 // longest) rather than a finding that a good week or a long record lowers
 // value. A term the data cannot separate from size stays a damped,
-// stated term, and the page says so.
+// stated term, and the page says so. Radar-6 winsorizes the week to
+// ±20%: one row reads +4448.47% in a week, and at the old cap of +100%
+// that spike alone lifted it 56 places (rank 35 where no growth at all
+// would put it at 91). A single week is the noisiest figure in the
+// snapshot, so no single week may move a row's value by more than 16%
+// up or 16% down; nine rows read above +20% and five below -20%, so the
+// winsorized term binds 14 board rows.
 //
 // Age is the time since the protocol was first listed. An unknown age
 // uses the board's own median known age, 418 days (the median of the 191
@@ -97,9 +104,9 @@ export interface ModelConstants {
 export const MODEL: ModelConstants = {
   base_exponent: 0.5, // TVL slope, fitted on the 95 peers (0.4567 ± 0.1055)
   base_scale: 1575, // intercept refitted at slope 0.5 (log10 3.1972)
-  growth_weight: 0.8, // one week may move value 1.8x at most
-  growth_floor: -50, // the week's move, clamped
-  growth_cap: 100,
+  growth_weight: 0.8, // one week may move value 1.16x at most
+  growth_floor: -20, // the week's move, winsorized to ±20%
+  growth_cap: 20,
   maturity_floor: 0.5, // a newborn scores half a four-year protocol
   maturity_days: 1460, // four years to full maturity
   unknown_age_days: 418, // the board's median known age
@@ -118,6 +125,8 @@ export interface FitSummary {
   slope_se: number;
   slope_ci_lo: number;
   slope_ci_hi: number;
+  /** log10 intercept of the peer fit: market cap = 10^3.5291 x TVL^0.4567. */
+  intercept: number;
   r2: number;
   held_out_rmse_log10: number;
   held_out_factor: number;
@@ -129,13 +138,14 @@ export const FIT: FitSummary = {
   slope_se: 0.1055,
   slope_ci_lo: 0.25, // 95% interval: 0.25 to 0.66
   slope_ci_hi: 0.66,
+  intercept: 3.5291, // log10 intercept of the peer fit (10^ = $3,382)
   r2: 0.166, // TVL alone leaves most of the spread unexplained
   held_out_rmse_log10: 0.859, // 5-fold held out
   held_out_factor: 7.23, // a held-out guess is typically off by a factor of seven
 };
 
 /** The model's version label, which the dashboard names. */
-export const MODEL_VERSION = 'radar-5';
+export const MODEL_VERSION = 'radar-6';
 
 /** How many live-token protocols the Live token view carries, ordered by market cap. */
 export const LIVE_ROWS = 24;
@@ -205,6 +215,12 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
+/** One of the 95 live-token peers behind the TVL fit: a real market cap against a real TVL. */
+export interface PeerPoint {
+  tvl_usd: number;
+  mcap_usd: number;
+}
+
 /** A protocol the board does not rank, together with the reason it is not ranked. */
 export interface AccountedRow {
   slug: string;
@@ -230,6 +246,8 @@ export interface RadarData {
   accounted_size: number; // protocols listed in the accounted view
   rows: RadarRow[];
   live: LiveRow[];
+  /** The 95 peers of the TVL fit, smallest TVL first: what the scatter draws. */
+  peers: PeerPoint[];
   accounted: AccountedRow[];
 }
 
@@ -427,6 +445,8 @@ function holdDaysFor(age: number | null): number {
 function actionFor(p: SnapshotProtocol, capital: number, chain: string): string {
   const c = (p.category ?? '').toLowerCase();
   const name = p.name;
+  // 'Indexes' contains 'dex': the index rule must come before the DEX rule.
+  if (c.includes('index')) return `Buy $${capital} of the ${name} index on ${chain} and hold it.`;
   if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return `Lend $${capital} of USDC on ${name} (${chain}) and leave the loan position open.`;
   if (c.includes('dex') || c.includes('amm') || c.includes('swap')) return `Add $${capital} of liquidity to ${name}'s main pool on ${chain} and leave the position in range.`;
   if (c.includes('bridge')) return `Move $${capital} of USDC to ${chain} through ${name}, then put the bridged funds to work inside its app.`;
@@ -436,8 +456,16 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   if (c.includes('curator') || c.includes('allocator') || c.includes('vault')) return `Put $${capital} into a ${name} vault on ${chain} and hold the vault shares.`;
   if (c.includes('yield')) return `Put $${capital} into ${name}'s main yield strategy on ${chain} and leave the position open.`;
   if (c.includes('stable')) return `Mint or hold $${capital} of the stable asset through ${name} on ${chain}.`;
-  if (c.includes('rwa')) return `Mint $${capital} of the protocol's yield-bearing asset on ${chain} and hold it.`;
+  if (c.includes('rwa')) return `Mint $${capital} of ${name}'s yield-bearing asset on ${chain} and hold it.`;
   if (c.includes('insurance')) return `Buy $${capital} of cover from ${name} on ${chain} and keep the policy live.`;
+  if (c.includes('liquidity manager')) return `Add $${capital} of liquidity through ${name}'s managed vaults on ${chain} and leave it in range.`;
+  if (c.includes('leverag') || c.includes('farm')) return `Put $${capital} into a ${name} farm on ${chain} and leave the position open.`;
+  if (c.includes('payments')) return `Route $${capital} of payments through ${name} on ${chain} and keep the wallet active.`;
+  if (c.includes('otc')) return `Place a $${capital} order on ${name}'s OTC desk on ${chain}.`;
+  if (c.includes('cedefi')) return `Put $${capital} into ${name}'s CeDeFi strategy on ${chain} and leave the position open.`;
+  if (c.includes('anchor') || c.includes('decentralized btc')) return `Mint or hold $${capital} of the BTC-anchored asset through ${name} on ${chain}.`;
+  if (c.includes('governance')) return `Stake $${capital} with ${name} on ${chain} to earn its governance incentives.`;
+  if (c.includes('card')) return `Top up a ${name} card with $${capital} on ${chain} and spend from it.`;
   if (c.includes('chain')) return `Bridge $${capital} of USDC to ${name} and try one app built on it.`;
   return `Put $${capital} of USDC into ${name} on ${chain} and leave the position open.`;
 }
@@ -445,12 +473,25 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
 /** The weekly qualifying action, varied by what the protocol does. */
 function weeklyFor(p: SnapshotProtocol): string {
   const c = (p.category ?? '').toLowerCase();
-  if (c.includes('lend') || c.includes('cdp')) return 'borrow a little against the deposit and pay it back';
+  // 'Indexes' contains 'dex': the index rule must come before the DEX rule.
+  if (c.includes('index')) return 'rebalance the index position once';
+  if (c.includes('lend') || c.includes('cdp') || c.includes('collateral')) return 'borrow a little against the deposit and pay it back';
   if (c.includes('dex') || c.includes('amm') || c.includes('swap')) return 'swap a little through the pool';
   if (c.includes('bridge')) return 'bridge a little in either direction';
   if (c.includes('perpetual') || c.includes('derivative') || c.includes('basis')) return 'trim the hedge by a little';
   if (c.includes('prediction')) return 'settle or open one small market position';
-  if (c.includes('yield') || c.includes('curator') || c.includes('allocator') || c.includes('vault')) return "claim the week's yield and put it back in";
+  if (c.includes('yield') || c.includes('curator') || c.includes('allocator') || c.includes('vault') || c.includes('rwa') || c.includes('stable')) return "claim the week's yield and put it back in";
+  if (c.includes('staking pool') || c.includes('restak')) return "restake the week's rewards";
+  if (c.includes('insurance')) return 'check the cover stays live';
+  if (c.includes('liquidity manager')) return 'rebalance the managed position once';
+  if (c.includes('leverag') || c.includes('farm')) return 'harvest the farm rewards and put them back in';
+  if (c.includes('payments')) return 'route one small payment';
+  if (c.includes('otc')) return 'check for a new OTC listing';
+  if (c.includes('cedefi')) return "check the CeDeFi yield and compound it";
+  if (c.includes('anchor') || c.includes('decentralized btc')) return 'check the BTC peg and top up a little';
+  if (c.includes('governance')) return 'vote once on a governance proposal';
+  if (c.includes('card')) return 'spend a little on the card';
+  if (c.includes('chain')) return 'try one app built on it once';
   return 'deposit, swap or vote once';
 }
 
@@ -468,7 +509,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const weekly = weeklyFor(p);
   return [
     {
-      text: `Open a fresh wallet on ${chain} to use only for this farm, and write its seed phrase on paper and keep it somewhere safe offline.`,
+      text: `Open a fresh wallet on ${chain} to farm ${p.name}, and write its seed phrase on paper and keep it somewhere safe offline.`,
       cost: 'about $3 of gas for the first transaction',
       time: '5 minutes',
     },
@@ -483,17 +524,17 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
       time: '10 minutes a week',
     },
     {
-      text: `Keep the position open for at least ${hold} days so the activity covers more than one snapshot.`,
+      text: `Keep the $${capital} position on ${chain} open for at least ${hold} days so the activity covers more than one snapshot.`,
       cost: `the $${capital} stays locked in the position`,
       time: `${hold} days`,
     },
     {
-      text: `When you are ready to withdraw, check the protocol's own points or rewards page first and claim only from the link it publishes; never pay anyone to claim on your behalf.`,
+      text: `When you are ready to withdraw from ${p.name}, check its own points or rewards page first and claim only from the link it publishes; never pay anyone to claim on your behalf.`,
       cost: 'free to check, and never pay to claim',
       time: '10 minutes',
     },
     {
-      text: `Keep a farm log of the wallet, the dates and every transaction hash, so you can repeat the position or unwind it cleanly.`,
+      text: `Keep a farm log for the ${p.name} position on ${chain}: the wallet, the dates and every transaction hash, so you can repeat the position or unwind it cleanly.`,
       cost: 'free, apart from the log',
       time: '5 minutes',
     },
@@ -512,6 +553,13 @@ export function farmVerdict(p: SnapshotProtocol, age: number | null, impliedUsd:
   const hold = holdDaysFor(age);
   const weekly = weeklyFor(p);
   return `Farm verdict: $${capital} in, about $${capital >= 150 ? 8 : 4} of gas to set up, hold at least ${hold} days, ${weekly} once a week — for an implied value of $${impliedUsd.toLocaleString('en-US')}.`;
+}
+
+/** The 95 live-token protocols with a market cap, a TVL and a listed date — the peer fit's own points. A zero market cap is not a market cap: it is an unreported one, and log10(0) is not a point. */
+export function peerPoints(snapshot: Snapshot): PeerPoint[] {
+  const peers = snapshot.protocols.filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0 && p.listed_at !== null);
+  peers.sort((a, b) => a.tvl_usd - b.tvl_usd);
+  return peers.map((p) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd! }));
 }
 
 /** The live-token protocols, by market cap, for the dashboard's Live token view. */
@@ -566,6 +614,7 @@ export function radarRow(row: BoardRow, watchlist: Set<string>): RadarRow {
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const board = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
+  const peers = peerPoints(snapshot);
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
   const shown = new Set([...board.map((r) => r.slug), ...live.map((r) => r.slug)]);
   const accounted = accountedRows(snapshot, shown);
@@ -583,6 +632,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     accounted_size: accounted.length,
     rows: board.map((r) => radarRow(r, new Set(snapshot.watchlist))),
     live,
+    peers,
     accounted,
   };
   return { board, radar };
